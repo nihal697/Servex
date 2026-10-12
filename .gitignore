@@ -1,0 +1,9 @@
+# Never commit private keys or transfer copies.
+*.key
+*_phone
+*_phone.pub
+phone_sftp*
+*phone_sftp*
+.ssh/
+*.pem
+*.ppk
