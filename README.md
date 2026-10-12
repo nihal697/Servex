@@ -103,6 +103,43 @@ Username: phone
 Password: <what you set>
 ```
 
+> If you jailed the user (next section), the URI changes to the in-jail paths,
+> e.g. `sftp://your-server:22/shared/...` — the jail root, not `/home/...`.
+
+### SFTP-only jail (recommended hardening)
+
+A password user with a normal shell is the weakest part of Option A: a leaked
+password means a terminal. Jail them to files-only with no shell:
+
+```bash
+# 1. Jail root must be root-owned (chroot requirement). Mount --bind only the
+#    folders the phone needs (same filesystem → existing chmod/ACLs apply).
+sudo mkdir -p /home/phone/shared
+sudo mount --bind /home/ubuntu/shared /home/mixplorer/shared
+#    persist across reboots (escape spaces as \040):
+echo "/home/ubuntu/shared /home/phone/shared none bind,nofail 0 0" | sudo tee -a /etc/fstab
+
+sudo chown root:root /home/phone && sudo chmod 755 /home/phone
+sudo usermod -s /usr/sbin/nologin phone
+
+# 2. So both sides can always edit each other's files:
+#    setgid (new files inherit the shared group) + default ACLs for BOTH users
+sudo find /home/ubuntu/shared -type d -exec chmod g+s {} +
+sudo setfacl -R -d -m u:phone:rwX,u:ubuntu:rwX /home/ubuntu/shared
+
+# 3. sshd Match block additions (keep the password/forwarder lines from Option A):
+#      ChrootDirectory /home/phone
+#      ForceCommand internal-sftp -u 0002
+sudo sshd -t && sudo systemctl reload ssh
+```
+
+Two subtleties we learned the hard way:
+- **Never `chown`/`chmod` a bind-mountpoint** expecting to affect only it — it changes the *source* dir (we once flipped a work folder to `root:root` this way; revert with `chown ubuntu:ubuntu` + `chmod 2775`).
+- **The `-u 0002` umask can't widen modes the client doesn't request** (most clients propose `644`), so phone uploads may still arrive group-read-only. Fix with a normalizer cron that hands ownership to the main user while keeping the phone's ACL entry:
+  ```
+  */5 * * * * root find /home/ubuntu/shared -user phone -exec chown ubuntu:ubuntu {} + -exec setfacl -m u:phone:rw-,g::rw-,m::rw-,o::r-- {} +
+  ```
+  Verified both directions: owner edits, phone overwrites in place, phone deletes — all keep working after normalization.
 ### Future-proof permissions (so new files don't lock the phone out)
 
 Some tools create files/folders owner-only (`700`/`600`). Your phone user then gets "Permission denied" on new stuff. Two fixes:
@@ -193,6 +230,7 @@ Every SFTP client needs the same 4 things: **host, port (22), username, and ONE 
 
 - [ ] Global `PasswordAuthentication no` untouched (verify with `sshd -T`)
 - [ ] Phone password user limited via `Match` + no forwarding/tunneling
+- [ ] Phone user jailed (`ChrootDirectory` + `internal-sftp`, `nologin` shell) if passwords exist
 - [ ] Owner key restricted with `restrict,command="…/sftp-server"` (files only)
 - [ ] Transfer copies of private keys deleted from the server after import
 - [ ] Private key never committed anywhere (this repo's `.gitignore` blocks `*.key`)
