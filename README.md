@@ -196,7 +196,36 @@ Every SFTP client needs the same 4 things: **host, port (22), username, and ONE 
 - [ ] Owner key restricted with `restrict,command="…/sftp-server"` (files only)
 - [ ] Transfer copies of private keys deleted from the server after import
 - [ ] Private key never committed anywhere (this repo's `.gitignore` blocks `*.key`)
-- [ ] Optional but wise: `sudo apt-get install -y fail2ban` (brute-force protection on port 22)
+- [ ] fail2ban installed and the `sshd` jail active (see below)
+
+### fail2ban (brute-force protection)
+
+The moment port 22 is public, bots try thousands of logins (we saw 19 attempts and a ban within seconds of enabling it). fail2ban auto-bans IPs after repeated failures:
+
+```bash
+sudo apt-get install -y fail2ban
+sudo systemctl enable --now fail2ban
+
+# On modern Ubuntu there is no /var/log/auth.log (journal-only logging),
+# so point the sshd jail at systemd or fail2ban won't start:
+sudo tee /etc/fail2ban/jail.d/sshd-systemd.conf > /dev/null <<'EOF'
+[sshd]
+backend = systemd
+EOF
+sudo systemctl restart fail2ban
+
+# Verify (expect: Jail list: sshd, with failed/banned counters climbing)
+sudo fail2ban-client status
+sudo fail2ban-client status sshd
+```
+
+Defaults (5 failures → 10-min ban) are fine for a phone setup. Useful commands:
+
+```bash
+sudo fail2ban-client status sshd          # currently failed / banned IPs
+sudo fail2ban-client set sshd unbanip <IP>  # you typo'd your own password too often
+sudo journalctl -u fail2ban -f            # watch bans happen live
+```
 
 ## Troubleshooting
 
@@ -208,6 +237,7 @@ Every SFTP client needs the same 4 things: **host, port (22), username, and ONE 
 | Permission denied on some folders | Owner-only `700`/`600` bits | `chmod -R g+rwX` + default ACLs (Option A), or switch to Option B |
 | Key rejected: invalid format | Old client vs ed25519 | Regenerate with `ssh-keygen -t rsa -b 3072` |
 | Changed something, SSH broke | Bad sshd config | `sshd -t` before every reload; keep one SSH session open while testing |
+| Locked out by fail2ban (own IP) | Too many failed logins | From another connection: `sudo fail2ban-client set sshd unbanip <your-IP>` |
 
 ## Repo contents
 
