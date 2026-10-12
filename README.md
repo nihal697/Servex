@@ -108,6 +108,13 @@ Password: <what you set>
 
 ### SFTP-only jail (recommended hardening)
 
+> **Field note:** we ran this jail for a day, then retired the `ChrootDirectory`
+> half — allowlisting every folder the phone needs meant rebuilding the whole
+> home view mount-by-mount. Kept: `nologin` shell + `ForceCommand internal-sftp`
+> (no terminal ever) with the full view. Real secrets stay protected by their
+> own file bits (`600`, `opc`-owned keys), which never depended on the chroot.
+> Use the chroot below only if you truly want a scoped-down view.
+
 A password user with a normal shell is the weakest part of Option A: a leaked
 password means a terminal. Jail them to files-only with no shell:
 
